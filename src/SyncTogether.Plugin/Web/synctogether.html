@@ -1,0 +1,204 @@
+<div is="emby-scroller"
+     class="view flex flex-direction-column scrollFrameY flex-grow syncTogetherPage"
+     data-horizontal="false"
+     data-forcescrollbar="true"
+     data-centerfocus="true"
+     data-bindheader="true"
+     data-controller="__plugin/synctogetherjs"
+     data-title="异地一起看">
+    <style>
+        .syncTogetherPage {
+            --st-accent: #52b54b;
+            --st-danger: #d85b61;
+            --st-border: rgba(128, 128, 128, .24);
+            --st-surface: rgba(128, 128, 128, .09);
+            --st-surface-hover: rgba(128, 128, 128, .15);
+        }
+
+        .syncTogetherPage * { box-sizing: border-box; }
+        .syncTogetherPage .st-shell { width: min(70rem, 100%); margin: 0 auto; }
+        .syncTogetherPage .st-hero {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 2rem;
+            margin-bottom: 1.8rem;
+        }
+        .syncTogetherPage .st-brand { display: flex; align-items: center; gap: 1rem; min-width: 0; }
+        .syncTogetherPage .st-mark { position: relative; flex: 0 0 3.25rem; width: 3.25rem; height: 3.25rem; }
+        .syncTogetherPage .st-mark::before,
+        .syncTogetherPage .st-mark::after {
+            content: "";
+            position: absolute;
+            top: .72rem;
+            width: 1.65rem;
+            height: 1.65rem;
+            border: .16rem solid var(--st-accent);
+            border-radius: 50%;
+        }
+        .syncTogetherPage .st-mark::before { left: .12rem; }
+        .syncTogetherPage .st-mark::after { right: .12rem; }
+        .syncTogetherPage .st-heading { margin: 0; font-size: 2rem; font-weight: 600; letter-spacing: -.025em; }
+        .syncTogetherPage .st-lead { max-width: 42rem; margin: .45rem 0 0; line-height: 1.55; }
+        .syncTogetherPage .st-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: .5rem;
+            flex: 0 0 auto;
+            padding: .62rem .82rem;
+            border: 1px solid rgba(82, 181, 75, .38);
+            border-radius: 999px;
+            color: var(--st-accent);
+            background: rgba(82, 181, 75, .08);
+            font-size: .82rem;
+            font-weight: 600;
+        }
+        .syncTogetherPage .st-badge-dot { width: .48rem; height: .48rem; border-radius: 50%; background: currentColor; }
+        .syncTogetherPage .st-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(20rem, .92fr); gap: 1rem; }
+        .syncTogetherPage .st-column { display: grid; align-content: start; gap: 1rem; min-width: 0; }
+        .syncTogetherPage .st-card {
+            padding: 1.35rem;
+            border: 1px solid var(--st-border);
+            border-radius: .9rem;
+            background: var(--st-surface);
+        }
+        .syncTogetherPage .st-card--room {
+            border-color: rgba(82, 181, 75, .42);
+            background: linear-gradient(135deg, rgba(82, 181, 75, .14), var(--st-surface) 58%);
+        }
+        .syncTogetherPage .st-card-title { margin: 0; font-size: 1.08rem; font-weight: 600; }
+        .syncTogetherPage .st-card-copy { margin: .4rem 0 1.15rem; line-height: 1.5; }
+        .syncTogetherPage .st-actions { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: 1rem; }
+        .syncTogetherPage .st-actions .emby-button { margin: 0; }
+        .syncTogetherPage .st-primary { background: var(--st-accent) !important; color: #071107 !important; }
+        .syncTogetherPage .st-danger { background: var(--st-danger) !important; color: #fff !important; }
+        .syncTogetherPage .st-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+        .syncTogetherPage .st-toolbar .emby-button { margin: 0; }
+        .syncTogetherPage .st-device-list { display: grid; gap: .65rem; }
+        .syncTogetherPage .st-device {
+            display: grid;
+            grid-template-columns: 2.65rem minmax(0, 1fr) auto;
+            align-items: center;
+            gap: .8rem;
+            width: 100%;
+            min-height: 4.4rem;
+            padding: .72rem .78rem;
+            border: 1px solid var(--st-border);
+            border-radius: .72rem;
+            color: inherit;
+            background: transparent;
+            font: inherit;
+            text-align: start;
+            cursor: pointer;
+        }
+        .syncTogetherPage .st-device:hover { background: var(--st-surface-hover); }
+        .syncTogetherPage .st-device[data-selected="true"] { border-color: var(--st-accent); background: rgba(82, 181, 75, .1); }
+        .syncTogetherPage .st-device:disabled { opacity: .48; cursor: default; }
+        .syncTogetherPage .st-device-icon {
+            display: grid;
+            place-items: center;
+            width: 2.65rem;
+            height: 2.65rem;
+            border-radius: .62rem;
+            background: var(--st-surface-hover);
+            font-size: 1.25rem;
+        }
+        .syncTogetherPage .st-device-copy { display: grid; min-width: 0; gap: .28rem; }
+        .syncTogetherPage .st-device-name,
+        .syncTogetherPage .st-device-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .syncTogetherPage .st-device-name { font-weight: 600; }
+        .syncTogetherPage .st-device-meta { font-size: .82rem; }
+        .syncTogetherPage .st-online { width: .55rem; height: .55rem; border-radius: 50%; background: rgba(128, 128, 128, .55); }
+        .syncTogetherPage .st-online[data-online="true"] { background: var(--st-accent); box-shadow: 0 0 0 .22rem rgba(82, 181, 75, .13); }
+        .syncTogetherPage .st-code {
+            margin: .9rem 0 0;
+            padding: .82rem .9rem;
+            border: 1px solid var(--st-border);
+            border-radius: .62rem;
+            background: rgba(0, 0, 0, .12);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 1rem;
+            letter-spacing: .055em;
+            overflow-wrap: anywhere;
+            user-select: all;
+        }
+        .syncTogetherPage .st-notice { display: none; margin-bottom: 1rem; padding: .85rem 1rem; border-radius: .65rem; line-height: 1.45; }
+        .syncTogetherPage .st-notice[data-kind="error"] { display: block; border: 1px solid rgba(216, 91, 97, .45); color: #ffd8da; background: rgba(216, 91, 97, .12); }
+        .syncTogetherPage .st-notice[data-kind="success"] { display: block; border: 1px solid rgba(82, 181, 75, .42); color: #bff0bb; background: rgba(82, 181, 75, .1); }
+        .syncTogetherPage .st-empty { padding: 1rem 0 .25rem; text-align: center; line-height: 1.55; }
+        .syncTogetherPage .st-skeleton { height: 4.4rem; border-radius: .72rem; background: var(--st-surface-hover); animation: st-pulse 1.25s ease-in-out infinite alternate; }
+        @keyframes st-pulse { to { opacity: .48; } }
+        @media (max-width: 52rem) {
+            .syncTogetherPage .st-hero { display: grid; gap: 1rem; }
+            .syncTogetherPage .st-badge { justify-self: start; }
+            .syncTogetherPage .st-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 32rem) {
+            .syncTogetherPage .st-heading { font-size: 1.55rem; }
+            .syncTogetherPage .st-card { padding: 1rem; }
+        }
+        @media (prefers-reduced-motion: reduce) { .syncTogetherPage .st-skeleton { animation: none; } }
+    </style>
+
+    <div class="scrollSlider flex-grow flex-direction-column padded-left padded-left-page padded-right padded-top-page padded-bottom-page">
+        <div class="st-shell">
+            <header class="st-hero">
+                <div class="st-brand">
+                    <span class="st-mark" aria-hidden="true"></span>
+                    <div>
+                        <h1 class="st-heading">异地一起看</h1>
+                        <p class="st-lead secondaryText">选择自己的 Emby 播放设备，创建房间或使用好友分享的口令加入。播放、暂停、跳转和停止由服务器插件同步。</p>
+                    </div>
+                </div>
+                <div class="st-badge"><span class="st-badge-dot"></span><span>服务端播放同步</span></div>
+            </header>
+
+            <div class="st-notice" role="status" aria-live="polite"></div>
+
+            <div class="st-grid">
+                <main class="st-column">
+                    <section class="st-current"></section>
+
+                    <section class="st-card st-create-card">
+                        <h2 class="st-card-title">创建房间</h2>
+                        <p class="st-card-copy secondaryText">为当前选中的播放设备创建一个同步房间。</p>
+                        <div class="inputContainer">
+                            <input is="emby-input" type="text" class="st-name" maxlength="64" autocomplete="off" label="房间名称" placeholder="例如：周五电影夜">
+                        </div>
+                        <div class="st-actions">
+                            <button is="emby-button" type="button" class="raised st-primary st-create"><span>创建并进入</span></button>
+                        </div>
+                    </section>
+
+                    <section class="st-card st-join-card">
+                        <h2 class="st-card-title">加入房间</h2>
+                        <p class="st-card-copy secondaryText">粘贴好友发送的房间口令，即可让所选设备加入同步。</p>
+                        <div class="inputContainer">
+                            <input is="emby-input" type="text" class="st-party-id" autocomplete="off" spellcheck="false" label="房间口令" placeholder="粘贴房间口令">
+                        </div>
+                        <div class="st-actions">
+                            <button is="emby-button" type="button" class="raised st-join"><span>加入房间</span></button>
+                        </div>
+                    </section>
+                </main>
+
+                <aside class="st-column">
+                    <section class="st-card">
+                        <div class="st-toolbar">
+                            <div>
+                                <h2 class="st-card-title">播放设备</h2>
+                                <div class="secondaryText" style="margin-top:.35rem;font-size:.86rem">只显示当前账号的活跃会话</div>
+                            </div>
+                            <button is="emby-button" type="button" class="button-flat st-refresh" title="刷新设备"><span>刷新</span></button>
+                        </div>
+                        <div class="st-device-list" aria-live="polite">
+                            <div class="st-skeleton"></div>
+                            <div class="st-skeleton"></div>
+                            <div class="st-skeleton"></div>
+                        </div>
+                    </section>
+                </aside>
+            </div>
+        </div>
+    </div>
+</div>

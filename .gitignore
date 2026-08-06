@@ -1,0 +1,29 @@
+# Build outputs
+artifacts/
+dist/
+**/bin/
+**/obj/
+
+# Target Emby assemblies (closed-source, fetched locally)
+vendor/emby-*/
+
+# Local deployment configuration
+.env
+.env.*
+scripts/
+
+# Generated browser/test output
+.playwright-cli/
+output/
+
+# Source screen recordings
+屏幕录像_*.gif
+*_out.gif
+
+# IDE / OS
+.idea/
+.vscode/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
