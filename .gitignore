@@ -16,7 +16,8 @@ scripts/
 .playwright-cli/
 output/
 
-# Source screen recordings
+# Source screenshots and screen recordings
+屏幕截图_*.png
 屏幕录像_*.gif
 *_out.gif
 
