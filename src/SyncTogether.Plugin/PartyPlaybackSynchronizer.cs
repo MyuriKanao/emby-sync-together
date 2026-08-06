@@ -23,6 +23,7 @@ public sealed class PartyPlaybackSynchronizer : IServerEntryPoint
     private const int SoftDriftConfirmations = 2;
     private static readonly TimeSpan DriftCheckInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan SuppressionLifetime = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan PlaybackTransitionLifetime = TimeSpan.FromSeconds(15);
 
     private readonly ISessionManager _sessionManager;
     private readonly ILogger _logger;
@@ -30,6 +31,8 @@ public sealed class PartyPlaybackSynchronizer : IServerEntryPoint
     private readonly ConcurrentDictionary<string, PartyRelayState> _partyStates =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, long> _suppressions =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, PlaybackTransition> _playbackTransitions =
         new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
 
@@ -131,11 +134,21 @@ public sealed class PartyPlaybackSynchronizer : IServerEntryPoint
     private void OnPlaybackStart(object sender, PlaybackProgressEventArgs e)
     {
         if (!TryGetPartyId(e.Session, out var partyId) ||
-            IsSuppressed(e.Session.Id, RelayEvent.Start) ||
             e.Item == null)
         {
             return;
         }
+
+        // A remote PlayNow command can make Emby Web report more than one
+        // start while it tears down the old player and waits for an external
+        // transcode. Treat every matching report inside the transition window
+        // as an acknowledgement instead of relaying it back to the sender.
+        if (IsExpectedPlaybackTransition(e.Session.Id, e.Item.InternalId))
+        {
+            return;
+        }
+
+        CancelPlaybackTransition(e.Session.Id);
 
         var item = e.Item;
         var positionTicks = e.PlaybackPositionTicks ?? e.Session.PlayState.PositionTicks;
@@ -201,6 +214,7 @@ public sealed class PartyPlaybackSynchronizer : IServerEntryPoint
     {
         if (e.IsAutomated || e.PlayedToCompletion ||
             !TryGetPartyId(e.Session, out var partyId) ||
+            IsPlaybackTransitionActive(e.Session.Id) ||
             IsSuppressed(e.Session.Id, RelayEvent.Stop))
         {
             return;
@@ -329,8 +343,16 @@ public sealed class PartyPlaybackSynchronizer : IServerEntryPoint
             return;
         }
 
+        // Until the remote client reports its new item, SessionInfo still
+        // describes the old playback. Without an in-flight guard, every time
+        // update sends PlayNow again. That is mostly invisible on a LAN but
+        // repeatedly restarts HLS playback over a higher-latency public URL.
+        if (!TryBeginPlaybackTransition(target.Id, item.InternalId))
+        {
+            return;
+        }
+
         Suppress(target.Id, RelayEvent.Stop);
-        Suppress(target.Id, RelayEvent.Start);
         Suppress(target.Id, RelayEvent.StateChange);
         Suppress(target.Id, RelayEvent.Unpause);
 
@@ -366,6 +388,7 @@ public sealed class PartyPlaybackSynchronizer : IServerEntryPoint
         }
         catch (Exception ex)
         {
+            CancelPlaybackTransition(target.Id, item.InternalId);
             _logger.ErrorException(
                 "SyncTogether failed to relay Play to {0}", ex, target.DeviceName);
         }
@@ -689,8 +712,96 @@ public sealed class PartyPlaybackSynchronizer : IServerEntryPoint
             return false;
         }
 
-        _suppressions.TryRemove(key, out _);
-        return expiryTicks >= DateTime.UtcNow.Ticks;
+        if (expiryTicks < DateTime.UtcNow.Ticks)
+        {
+            _suppressions.TryRemove(key, out _);
+            return false;
+        }
+
+        // Stopping or replacing a player can produce several stop reports
+        // (old item, empty player, aborted transcode). Keep stop suppression
+        // alive for the full window; other commands consume one response.
+        if (!string.Equals(relayEvent, RelayEvent.Stop, StringComparison.Ordinal))
+        {
+            _suppressions.TryRemove(key, out _);
+        }
+
+        return true;
+    }
+
+    private bool TryBeginPlaybackTransition(string sessionId, long itemId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        while (true)
+        {
+            if (_playbackTransitions.TryGetValue(sessionId, out var current))
+            {
+                if (current.ExpiresAt > now && current.ItemId == itemId)
+                {
+                    return false;
+                }
+
+                var replacement = new PlaybackTransition(
+                    itemId, now.Add(PlaybackTransitionLifetime));
+                if (_playbackTransitions.TryUpdate(sessionId, replacement, current))
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (_playbackTransitions.TryAdd(
+                    sessionId,
+                    new PlaybackTransition(itemId, now.Add(PlaybackTransitionLifetime))))
+            {
+                return true;
+            }
+        }
+    }
+
+    private bool IsExpectedPlaybackTransition(string sessionId, long itemId)
+    {
+        if (!_playbackTransitions.TryGetValue(sessionId, out var transition))
+        {
+            return false;
+        }
+
+        if (transition.ExpiresAt <= DateTimeOffset.UtcNow)
+        {
+            _playbackTransitions.TryRemove(sessionId, out _);
+            return false;
+        }
+
+        return transition.ItemId == itemId;
+    }
+
+    private bool IsPlaybackTransitionActive(string sessionId)
+    {
+        if (!_playbackTransitions.TryGetValue(sessionId, out var transition))
+        {
+            return false;
+        }
+
+        if (transition.ExpiresAt > DateTimeOffset.UtcNow)
+        {
+            return true;
+        }
+
+        _playbackTransitions.TryRemove(sessionId, out _);
+        return false;
+    }
+
+    private void CancelPlaybackTransition(string sessionId, long? expectedItemId = null)
+    {
+        if (expectedItemId.HasValue &&
+            _playbackTransitions.TryGetValue(sessionId, out var transition) &&
+            transition.ItemId != expectedItemId.Value)
+        {
+            return;
+        }
+
+        _playbackTransitions.TryRemove(sessionId, out _);
     }
 
     private static string SuppressionKey(string sessionId, string relayEvent)
@@ -731,9 +842,21 @@ public sealed class PartyPlaybackSynchronizer : IServerEntryPoint
             new(StringComparer.OrdinalIgnoreCase);
     }
 
+    private sealed class PlaybackTransition
+    {
+        public PlaybackTransition(long itemId, DateTimeOffset expiresAt)
+        {
+            ItemId = itemId;
+            ExpiresAt = expiresAt;
+        }
+
+        public long ItemId { get; }
+
+        public DateTimeOffset ExpiresAt { get; }
+    }
+
     private static class RelayEvent
     {
-        public const string Start = "start";
         public const string Stop = "stop";
         public const string Pause = "pause";
         public const string Unpause = "unpause";
