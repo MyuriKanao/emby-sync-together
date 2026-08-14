@@ -194,7 +194,15 @@ define([
 
         region.replaceChildren();
         this.view.querySelector('.st-create-card').style.display = party ? 'none' : '';
-        this.view.querySelector('.st-join-card').style.display = party ? 'none' : '';
+
+        // Joining has to stay reachable while in a room. Hiding it stranded
+        // anyone who created a room by mistake: the only way into their
+        // friend's room was to leave first, which is not obvious.
+        var joinCard = this.view.querySelector('.st-join-card');
+        joinCard.querySelector('.st-card-title').textContent = party ? '加入其他房间' : '加入房间';
+        joinCard.querySelector('.st-card-copy').textContent = party
+            ? '粘贴好友发送的房间口令，所选设备会先退出当前房间，再加入对方的房间。'
+            : '粘贴好友发送的房间口令，即可让所选设备加入同步。';
         if (!party) return;
 
         var card = document.createElement('section');
@@ -202,9 +210,12 @@ define([
         var title = document.createElement('h2');
         title.className = 'st-card-title';
         title.textContent = party.Name || '一起看房间';
+        var memberCount = (party.Sessions || []).length || 1;
         var description = document.createElement('p');
         description.className = 'st-card-copy secondaryText';
-        description.textContent = String((party.Sessions || []).length || 1) + ' 台设备已加入 · 播放中暂停、继续或拖动进度会立即校准';
+        description.textContent = memberCount > 1
+            ? memberCount + ' 台设备已加入 · 播放中暂停、继续或拖动进度会立即校准'
+            : '房间里只有这一台设备 · 把下面的口令发给好友，对方加入后才会开始同步';
         var code = document.createElement('div');
         code.className = 'st-code';
         code.textContent = party.Id;
@@ -216,8 +227,8 @@ define([
         resyncButton.type = 'button';
         resyncButton.setAttribute('is', 'emby-button');
         resyncButton.className = 'button-flat emby-button';
-        resyncButton.innerHTML = '<span>备用校准</span>';
-        resyncButton.title = '备用入口：以当前选中的设备为准，同步其他房间成员';
+        resyncButton.innerHTML = '<span>立即校准</span>';
+        resyncButton.title = '所选设备正在播放时以它为准同步其他人；未播放时让它追上房间里正在播放的进度';
         resyncButton.addEventListener('click', function () { instance.resyncParty(party.Id); });
         var copyButton = document.createElement('button');
         copyButton.type = 'button';
@@ -292,7 +303,7 @@ define([
             return api('SyncTogether/Parties/' + encodeURIComponent(partyId) + '/Resync', 'POST', {
                 SessionId: sessionId
             });
-        }, '校准完成：其他设备已同步到当前设备的播放状态。');
+        }, '校准完成：房间内的播放内容与进度已对齐。');
     };
 
     View.prototype.copyCode = function (partyId, button) {

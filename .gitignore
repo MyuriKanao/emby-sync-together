@@ -4,6 +4,10 @@ dist/
 **/bin/
 **/obj/
 
+# Locally provisioned .NET SDK and scratch build tree
+.dotnet/
+.build/
+
 # Target Emby assemblies (closed-source, fetched locally)
 vendor/emby-*/
 

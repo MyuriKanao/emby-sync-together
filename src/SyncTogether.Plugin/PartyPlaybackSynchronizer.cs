@@ -45,35 +45,30 @@ public sealed class PartyPlaybackSynchronizer : IServerEntryPoint
         Current = this;
     }
 
-    public async Task<int> ForceResynchronizeAsync(SessionInfo source)
+    public async Task<PartyResyncResult> ForceResynchronizeAsync(SessionInfo requester)
     {
         if (_disposed)
         {
             throw new ObjectDisposedException(nameof(PartyPlaybackSynchronizer));
         }
 
-        if (!TryGetPartyId(source, out var partyId))
+        if (!TryGetPartyId(requester, out var partyId))
         {
             throw new InvalidOperationException("The selected session is not in a watch party.");
-        }
-
-        if (source.FullNowPlayingItem == null)
-        {
-            throw new InvalidOperationException(
-                "The selected device is not currently playing anything.");
         }
 
         var state = _partyStates.GetOrAdd(partyId, _ => new PartyRelayState());
         await state.Gate.WaitAsync(_stopping.Token).ConfigureAwait(false);
         try
         {
-            if (!string.Equals(source.PartyId, partyId, StringComparison.OrdinalIgnoreCase) ||
-                source.FullNowPlayingItem == null)
+            var source = ResolveResyncSource(partyId, state, requester);
+            if (source?.FullNowPlayingItem == null)
             {
                 throw new InvalidOperationException(
-                    "The selected playback session changed before calibration completed.");
+                    "No device in this watch party is currently playing anything.");
             }
 
+            var item = source.FullNowPlayingItem;
             state.LeaderSessionId = source.Id;
             state.LastDriftCheck = DateTimeOffset.UtcNow;
             var positionTicks = source.PlayState.PositionTicks;
@@ -84,7 +79,7 @@ public sealed class PartyPlaybackSynchronizer : IServerEntryPoint
             foreach (var target in targets)
             {
                 state.DriftBreaches.TryRemove(target.Id, out _);
-                if (target.FullNowPlayingItem?.InternalId == source.FullNowPlayingItem.InternalId)
+                if (target.FullNowPlayingItem?.InternalId == item.InternalId)
                 {
                     if (positionTicks.HasValue)
                     {
@@ -99,10 +94,15 @@ public sealed class PartyPlaybackSynchronizer : IServerEntryPoint
                 }
                 else
                 {
+                    // The in-flight guard exists to stop automatic relays from
+                    // restarting remote playback. An explicit calibration must
+                    // still get through, otherwise the button reports success
+                    // while doing nothing for up to 15 seconds.
+                    CancelPlaybackTransition(target.Id);
                     await BringTargetToPlaybackAsync(
                             source,
                             target,
-                            source.FullNowPlayingItem,
+                            item,
                             positionTicks,
                             source.PlayState.MediaSourceId,
                             source.PlayState.IsPaused)
@@ -113,12 +113,40 @@ public sealed class PartyPlaybackSynchronizer : IServerEntryPoint
             _logger.Info(
                 "SyncTogether manually calibrated {0} target(s) from {1}",
                 targets.Length, source.DeviceName);
-            return targets.Length;
+            return new PartyResyncResult(
+                targets.Length, source.Id, positionTicks.GetValueOrDefault());
         }
         finally
         {
             state.Gate.Release();
         }
+    }
+
+    /// <summary>
+    /// Picks the party member that calibration should copy playback from. The
+    /// member who notices drift is usually the one that is *not* playing, so
+    /// falling back to another playing member keeps the button useful from
+    /// either side of the room.
+    /// </summary>
+    private SessionInfo? ResolveResyncSource(
+        string partyId,
+        PartyRelayState state,
+        SessionInfo requester)
+    {
+        var members = GetPartySessions(partyId).ToArray();
+        if (IsPlaying(requester) &&
+            members.Any(member => SameSession(member, requester)))
+        {
+            return requester;
+        }
+
+        return members.FirstOrDefault(member =>
+                   IsPlaying(member) &&
+                   string.Equals(member.Id, state.LeaderSessionId,
+                       StringComparison.OrdinalIgnoreCase)) ??
+               members.Where(IsPlaying)
+                   .OrderByDescending(member => member.LastActivityDate)
+                   .FirstOrDefault();
     }
 
     public void Run()
@@ -279,6 +307,16 @@ public sealed class PartyPlaybackSynchronizer : IServerEntryPoint
             .Where(target => !SameSession(source, target))
             .ToArray();
 
+        // A room that never received a second member looks identical to a
+        // broken relay from the outside, so say so once per playback start.
+        if (targets.Length == 0)
+        {
+            _logger.Info(
+                "SyncTogether has no relay target for party {0}: {1} is its only active member",
+                partyId, source.DeviceName);
+            return;
+        }
+
         foreach (var target in targets)
         {
             await BringTargetToPlaybackAsync(
@@ -297,6 +335,9 @@ public sealed class PartyPlaybackSynchronizer : IServerEntryPoint
             string.Equals(session.Id, joinedSessionId, StringComparison.OrdinalIgnoreCase));
         if (!IsControllable(target))
         {
+            _logger.Info(
+                "SyncTogether cannot sync session {0} joining party {1}: it does not accept remote control",
+                joinedSessionId, partyId);
             return;
         }
 
@@ -309,6 +350,9 @@ public sealed class PartyPlaybackSynchronizer : IServerEntryPoint
 
         if (source?.FullNowPlayingItem == null)
         {
+            _logger.Info(
+                "SyncTogether has nothing to send to {0}: no other member of party {1} is playing",
+                target!.DeviceName, partyId);
             return;
         }
 
@@ -698,6 +742,11 @@ public sealed class PartyPlaybackSynchronizer : IServerEntryPoint
         return session != null && session.IsActive && session.SupportsRemoteControl;
     }
 
+    private static bool IsPlaying(SessionInfo? session)
+    {
+        return session?.FullNowPlayingItem != null;
+    }
+
     private void Suppress(string sessionId, string relayEvent)
     {
         _suppressions[SuppressionKey(sessionId, relayEvent)] =
@@ -862,4 +911,23 @@ public sealed class PartyPlaybackSynchronizer : IServerEntryPoint
         public const string Unpause = "unpause";
         public const string StateChange = "state";
     }
+}
+
+/// <summary>
+/// Describes which session calibration synchronized the room from.
+/// </summary>
+public sealed class PartyResyncResult
+{
+    public PartyResyncResult(int targetCount, string leaderSessionId, long positionTicks)
+    {
+        TargetCount = targetCount;
+        LeaderSessionId = leaderSessionId;
+        PositionTicks = positionTicks;
+    }
+
+    public int TargetCount { get; }
+
+    public string LeaderSessionId { get; }
+
+    public long PositionTicks { get; }
 }

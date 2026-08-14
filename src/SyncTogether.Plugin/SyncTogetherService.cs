@@ -71,7 +71,18 @@ public sealed class SyncTogetherService : IService, IRequiresRequest
             throw new ArgumentException("PartyId is required.", nameof(request));
         }
 
-        var result = _sessionManager.JoinParty(session, request.PartyId.Trim());
+        var partyId = request.PartyId.Trim();
+
+        // A session belongs to one party at a time. A device that already
+        // created its own room would otherwise stay there, leaving two
+        // single-member rooms that can never relay to each other.
+        if (!string.IsNullOrWhiteSpace(session.PartyId) &&
+            !string.Equals(session.PartyId, partyId, StringComparison.OrdinalIgnoreCase))
+        {
+            _sessionManager.LeaveParty(session);
+        }
+
+        var result = _sessionManager.JoinParty(session, partyId);
         return new SyncPartyResultDto { Party = MapParty(RequireParty(result)) };
     }
 
@@ -100,15 +111,15 @@ public sealed class SyncTogetherService : IService, IRequiresRequest
 
         var synchronizer = PartyPlaybackSynchronizer.Current ??
             throw new InvalidOperationException("The playback synchronizer is not running.");
-        var targetCount = await synchronizer.ForceResynchronizeAsync(session)
+        var result = await synchronizer.ForceResynchronizeAsync(session)
             .ConfigureAwait(false);
 
         return new SyncResyncResultDto
         {
             Success = true,
-            TargetCount = targetCount,
-            LeaderSessionId = session.Id,
-            PositionTicks = session.PlayState.PositionTicks.GetValueOrDefault()
+            TargetCount = result.TargetCount,
+            LeaderSessionId = result.LeaderSessionId,
+            PositionTicks = result.PositionTicks
         };
     }
 

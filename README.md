@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img alt="版本 0.4.2" src="https://img.shields.io/badge/version-0.4.2-52b54b">
+  <img alt="版本 0.4.3" src="https://img.shields.io/badge/version-0.4.3-52b54b">
   <img alt="Emby 4.9.x" src="https://img.shields.io/badge/Emby-4.9.x-52b54b">
   <img alt=".NET Standard 2.0" src="https://img.shields.io/badge/.NET_Standard-2.0-512BD4">
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue"></a>
@@ -32,7 +32,7 @@ Emby 4.9.x 内置的 Party API 只负责保存房间成员关系，本身不会�
   - 小于 `800 ms`：忽略，避免频繁跳动
   - `800 ms～2 s`：连续两次出现后修正
   - 大于 `2 s`：立即修正
-- 房间页提供“备用校准”入口
+- 房间页提供“立即校准”入口，双向可用：所选设备在播放时作为基准，未播放时追上房间进度
 - 单 DLL 安装，不创建额外容器、端口或数据库
 
 ## 界面预览
